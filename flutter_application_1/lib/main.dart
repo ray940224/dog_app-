@@ -71,7 +71,7 @@ class LoginPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 
-                // 密碼輸入框2
+                // 密碼輸入框
                 TextField(
                   obscureText: true,
                   decoration: InputDecoration(
