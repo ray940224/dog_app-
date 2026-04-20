@@ -1,4 +1,14 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'dart:async';
+import 'package:http/http.dart' as http;
+
+// ==========================================
+// 全域變數：儲存 API 網址與警報閾值
+// ==========================================
+String globalApiBaseUrl = 'https://655b-27-147-10-223.ngrok-free.app/';
+double globalFeedThreshold = 20.0;   // 飼料剩餘低於此 % 數時警報
+double globalWaterThreshold = 15.0;  // 水位低於此 % 數時警報
 
 void main() {
   runApp(const IoTApp());
@@ -21,7 +31,6 @@ class IoTApp extends StatelessWidget {
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      // 系統啟動後的第一個畫面改為「登入頁面」
       home: const LoginPage(),
     );
   }
@@ -59,7 +68,6 @@ class LoginPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 40),
                 
-                // 帳號輸入框
                 TextField(
                   decoration: InputDecoration(
                     hintText: '電子郵件',
@@ -71,7 +79,6 @@ class LoginPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 
-                // 密碼輸入框
                 TextField(
                   obscureText: true,
                   decoration: InputDecoration(
@@ -84,7 +91,6 @@ class LoginPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 30),
                 
-                // 登入按鈕
                 FilledButton(
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -92,7 +98,6 @@ class LoginPage extends StatelessWidget {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                   ),
                   onPressed: () {
-                    // 點擊後跳轉到「寵物選擇頁面」
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => const PetSelectionPage()),
@@ -135,7 +140,6 @@ class PetSelectionPage extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             
-            // 寵物選項 1
             _buildPetCard(
               context,
               name: '布丁 (黃金獵犬)',
@@ -145,17 +149,15 @@ class PetSelectionPage extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             
-            // 寵物選項 2
             _buildPetCard(
               context,
               name: '麻糬 (曼赤肯貓)',
               status: '溫度偏低',
-              icon: Icons.pest_control_rodent, // Flutter預設icon較少，先用這個代替貓咪感
+              icon: Icons.pest_control_rodent,
               color: Colors.grey,
             ),
             
             const SizedBox(height: 20),
-            // 新增寵物按鈕
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -175,7 +177,6 @@ class PetSelectionPage extends StatelessWidget {
   Widget _buildPetCard(BuildContext context, {required String name, required String status, required IconData icon, required Color color}) {
     return GestureDetector(
       onTap: () {
-        // 點擊卡片後，進入主儀表板
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const MainNavigation()),
@@ -215,7 +216,7 @@ class PetSelectionPage extends StatelessWidget {
 }
 
 // ==========================================
-// 3. 主導覽架構 (維持上一版的設計)
+// 3. 主導覽架構
 // ==========================================
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -258,7 +259,7 @@ class _MainNavigationState extends State<MainNavigation> {
             items: const <BottomNavigationBarItem>[
               BottomNavigationBarItem(icon: Icon(Icons.space_dashboard_rounded), label: '監控'),
               BottomNavigationBarItem(icon: Icon(Icons.insert_chart_rounded), label: '數據'),
-              BottomNavigationBarItem(icon: Icon(Icons.tune_rounded), label: '控制'),
+              BottomNavigationBarItem(icon: Icon(Icons.tune_rounded), label: '設定'),
             ],
             currentIndex: _selectedIndex,
             onTap: _onItemTapped,
@@ -272,11 +273,70 @@ class _MainNavigationState extends State<MainNavigation> {
 // ==========================================
 // 4. 首頁儀表板 (Dashboard)
 // ==========================================
-class DashboardPage extends StatelessWidget {
+class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
   @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
+
+class _DashboardPageState extends State<DashboardPage> {
+  Timer? _timer;
+  String lightLux = '--';
+  double feedWeight = 0.0;
+  int waterAdc = 0;
+  String errorMessage = '';
+  
+  final double maxFeedWeight = 2000.0;
+  final double maxWaterAdc = 4095.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSensorData();
+    _timer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      _fetchSensorData();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetchSensorData() async {
+    try {
+      final baseUrl = globalApiBaseUrl.endsWith('/') ? globalApiBaseUrl : '$globalApiBaseUrl/';
+      final url = Uri.parse('${baseUrl}sensors');
+      
+      final response = await http.get(
+        url,
+        headers: {"ngrok-skip-browser-warning": "true"},
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          final luxValue = data['light_lux'];
+          lightLux = (luxValue is num) ? luxValue.toStringAsFixed(1) : '--';
+          feedWeight = (data['weight'] ?? 0.0).toDouble();
+          waterAdc = data['water_adc'] ?? 0;
+          errorMessage = '';
+        });
+      } else {
+        setState(() { errorMessage = '伺服器錯誤: ${response.statusCode}'; });
+      }
+    } catch (e) {
+      setState(() { errorMessage = '連線失敗: ${e.toString().split('\n').first}'; });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    double feedPercentage = (feedWeight / maxFeedWeight).clamp(0.0, 1.0);
+    double waterPercentage = (waterAdc / maxWaterAdc).clamp(0.0, 1.0);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('布丁的寵物艙', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 22)),
@@ -284,7 +344,6 @@ class DashboardPage extends StatelessWidget {
         elevation: 0,
         centerTitle: false,
         actions: [
-          // 加上一個可以登出的按鈕，方便測試切換
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.grey),
             onPressed: () {
@@ -300,6 +359,15 @@ class DashboardPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildCameraView(),
+            if (errorMessage.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 15.0),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade200)),
+                  child: Text(errorMessage, style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                ),
+              ),
             const SizedBox(height: 25),
             const Text('環境指標', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
             const SizedBox(height: 12),
@@ -309,7 +377,7 @@ class DashboardPage extends StatelessWidget {
                 const SizedBox(width: 15),
                 Expanded(child: _buildSmartTile(Icons.water_drop_rounded, '濕度', '55', '%', Colors.blue)),
                 const SizedBox(width: 15),
-                Expanded(child: _buildSmartTile(Icons.wb_sunny_rounded, '亮度', '適中', '', Colors.amber)),
+                Expanded(child: _buildSmartTile(Icons.wb_sunny_rounded, '亮度', lightLux, ' Lux', Colors.amber)),
               ],
             ),
             const SizedBox(height: 25),
@@ -317,16 +385,12 @@ class DashboardPage extends StatelessWidget {
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(20.0),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 5))],
-              ),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 5))]),
               child: Column(
                 children: [
-                  _buildLevelIndicator(Icons.pets, '飼料剩餘', 0.7, Colors.brown),
+                  _buildLevelIndicator(Icons.pets, '飼料剩餘', '${feedWeight.toStringAsFixed(1)} g', feedPercentage, Colors.brown),
                   const SizedBox(height: 20),
-                  _buildLevelIndicator(Icons.local_drink, '飲用水位', 0.3, Colors.lightBlue),
+                  _buildLevelIndicator(Icons.local_drink, '飲用水位', 'ADC: $waterAdc', waterPercentage, Colors.lightBlue),
                 ],
               ),
             ),
@@ -340,76 +404,28 @@ class DashboardPage extends StatelessWidget {
   Widget _buildCameraView() {
     return Container(
       height: 220,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.grey.shade800, Colors.black]),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 8))],
-      ),
-      child: Stack(
-        children: [
-          const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.videocam_rounded, color: Colors.white38, size: 50),
-                SizedBox(height: 8),
-                Text('攝影機連線中...', style: TextStyle(color: Colors.white54, letterSpacing: 1.2)),
-              ],
-            ),
-          ),
-          Positioned(
-            top: 16,
-            left: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(20)),
-              child: Row(
-                children: [
-                  Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle)),
-                  const SizedBox(width: 6),
-                  const Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.grey.shade800, Colors.black])),
+      child: const Center(child: Text('攝影機連線中...', style: TextStyle(color: Colors.white54))),
     );
   }
 
   Widget _buildSmartTile(IconData icon, String title, String value, String unit, Color color) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
-            child: Icon(icon, color: color, size: 24),
-          ),
+          Icon(icon, color: color, size: 24),
           const SizedBox(height: 12),
           Text(title, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-          const SizedBox(height: 4),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
-              if (unit.isNotEmpty) Text(unit, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade500)),
-            ],
-          ),
+          Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
 
-  Widget _buildLevelIndicator(IconData icon, String label, double percentage, Color color) {
+  Widget _buildLevelIndicator(IconData icon, String label, String valueText, double percentage, Color color) {
     return Row(
       children: [
         Icon(icon, color: Colors.grey.shade400, size: 24),
@@ -418,23 +434,9 @@ class DashboardPage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(label, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
-                  Text('${(percentage * 100).toInt()}%', style: TextStyle(fontWeight: FontWeight.bold, color: color)),
-                ],
-              ),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label), Text(valueText)]),
               const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: LinearProgressIndicator(
-                  value: percentage,
-                  minHeight: 12,
-                  backgroundColor: color.withOpacity(0.15),
-                  valueColor: AlwaysStoppedAnimation<Color>(color),
-                ),
-              ),
+              LinearProgressIndicator(value: percentage, minHeight: 12, backgroundColor: color.withOpacity(0.15), valueColor: AlwaysStoppedAnimation<Color>(color)),
             ],
           ),
         ),
@@ -453,84 +455,155 @@ class StatisticsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('歷史數據分析', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)]),
-              child: const Icon(Icons.insert_chart_outlined, size: 80, color: Color(0xFF4CA1AF)),
-            ),
-            const SizedBox(height: 24),
-            const Text('圖表載入中', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            const Text('即將從 Firebase 匯入寵物作息紀錄...', style: TextStyle(color: Colors.grey)),
-          ],
-        ),
-      ),
+      body: const Center(child: Text('圖表載入中...')),
     );
   }
 }
 
 // ==========================================
-// 6. 設定與控制頁面 (Settings & Control)
+// 6. 設定頁面 (Settings & Threshold Control)
 // ==========================================
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  final TextEditingController _urlController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _urlController.text = globalApiBaseUrl;
+  }
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  // 顯示百分比設定 Dialog
+  void _showThresholdDialog(String title, double currentValue, Function(double) onSave) {
+    double tempValue = currentValue;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(title),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('目前閾值: ${tempValue.toInt()}%', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF4CA1AF))),
+                  const SizedBox(height: 20),
+                  Slider(
+                    value: tempValue,
+                    min: 0,
+                    max: 100,
+                    divisions: 100,
+                    activeColor: const Color(0xFF4CA1AF),
+                    onChanged: (value) {
+                      setDialogState(() { tempValue = value; });
+                    },
+                  ),
+                  const Text('當剩餘量低於此數值時，系統將發送警報', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+                FilledButton(
+                  onPressed: () {
+                    onSave(tempValue);
+                    Navigator.pop(context);
+                    setState(() {}); // 刷新設定頁面 UI
+                  },
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF4CA1AF)),
+                  child: const Text('儲存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showApiUrlDialog() {
+    _urlController.text = globalApiBaseUrl;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('設定 API 網址'),
+        content: TextField(controller: _urlController, decoration: const InputDecoration(border: OutlineInputBorder())),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          FilledButton(
+            onPressed: () {
+              setState(() { globalApiBaseUrl = _urlController.text.trim(); });
+              Navigator.pop(context);
+            },
+            child: const Text('儲存'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('設備控制', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0),
+      appBar: AppBar(title: const Text('系統設定', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0),
       body: ListView(
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.all(20),
         children: [
-          const Text('遠端操作', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const Text('連線設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const SizedBox(height: 10),
+          _buildSettingsCard(
+            child: ListTile(
+              leading: const Icon(Icons.wifi, color: Colors.blue),
+              title: const Text('API 伺服器網址'),
+              subtitle: Text(globalApiBaseUrl, style: const TextStyle(fontSize: 12)),
+              trailing: const Icon(Icons.edit),
+              onTap: _showApiUrlDialog,
+            ),
+          ),
+          const SizedBox(height: 25),
+          const Text('警報閾值設定 (%)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
           const SizedBox(height: 10),
           _buildSettingsCard(
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(Icons.lightbulb_outline, color: Colors.amber),
-                  title: const Text('手動補光燈', style: TextStyle(fontWeight: FontWeight.w600)),
-                  trailing: Switch(value: true, activeColor: const Color(0xFF4CA1AF), onChanged: (bool value) {}),
+                  leading: const Icon(Icons.shopping_basket_outlined, color: Colors.brown),
+                  title: const Text('飼料剩餘警報'),
+                  subtitle: const Text('剩餘量過低時提醒'),
+                  trailing: Text('${globalFeedThreshold.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4CA1AF), fontSize: 16)),
+                  onTap: () => _showThresholdDialog('設定飼料警報閾值', globalFeedThreshold, (v) => globalFeedThreshold = v),
                 ),
                 const Divider(height: 1, indent: 50),
                 ListTile(
-                  leading: const Icon(Icons.restaurant_menu, color: Colors.brown),
-                  title: const Text('手動投放飼料', style: TextStyle(fontWeight: FontWeight.w600)),
-                  trailing: FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF4CA1AF), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                    onPressed: () {},
-                    child: const Text('投放'),
-                  ),
+                  leading: const Icon(Icons.opacity, color: Colors.blue),
+                  title: const Text('水位深度警報'),
+                  subtitle: const Text('飲水不足時提醒'),
+                  trailing: Text('${globalWaterThreshold.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4CA1AF), fontSize: 16)),
+                  onTap: () => _showThresholdDialog('設定水位警報閾值', globalWaterThreshold, (v) => globalWaterThreshold = v),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 25),
-          const Text('系統設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const Text('其他', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
           const SizedBox(height: 10),
           _buildSettingsCard(
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
-                  title: const Text('溫度警報閾值', style: TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: const Text('目前設定: > 30°C'),
-                  trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: () {},
-                ),
-                const Divider(height: 1, indent: 50),
-                ListTile(
-                  leading: const Icon(Icons.group_add_outlined, color: Colors.blue),
-                  title: const Text('家庭成員共享', style: TextStyle(fontWeight: FontWeight.w600)),
-                  trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: () {},
-                ),
-              ],
+            child: const ListTile(
+              leading: Icon(Icons.group_add_outlined, color: Colors.green),
+              title: Text('家庭成員共享'),
+              trailing: Icon(Icons.chevron_right),
             ),
           ),
         ],
@@ -540,11 +613,7 @@ class SettingsPage extends StatelessWidget {
 
   Widget _buildSettingsCard({required Widget child}) {
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
       child: child,
     );
   }
