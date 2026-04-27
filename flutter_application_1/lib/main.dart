@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:http/http.dart' as http;
+import 'widgets/whep_video_widget.dart';
 
 // ==========================================
 // 全域變數：儲存 API 網址與警報閾值
@@ -401,13 +402,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildCameraView() {
-    return Container(
-      height: 220,
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.grey.shade800, Colors.black])),
-      child: const Center(child: Text('攝影機連線中...', style: TextStyle(color: Colors.white54))),
-    );
-  }
+  Widget _buildCameraView() => const WhepVideoWidget();
 
   Widget _buildSmartTile(IconData icon, String title, String value, String unit, Color color) {
     return Container(
