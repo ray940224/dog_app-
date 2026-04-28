@@ -3,15 +3,22 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'widgets/whep_video_widget.dart';
+import 'services/settings_service.dart';
 
 // ==========================================
 // 全域變數：儲存 API 網址與警報閾值
 // ==========================================
-String globalApiBaseUrl = 'https://655b-27-147-10-223.ngrok-free.app/';
+String globalApiBaseUrl = 'http://137.184.181.86:8000/';
 double globalFeedThreshold = 20.0;   // 飼料剩餘低於此 % 數時警報
 double globalWaterThreshold = 15.0;  // 水位低於此 % 數時警報
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // 從本地儲存讀取上次的設定值
+  final settings = await SettingsService.load();
+  globalApiBaseUrl      = settings['apiUrl'];
+  globalFeedThreshold   = settings['feedThreshold'];
+  globalWaterThreshold  = settings['waterThreshold'];
   runApp(const IoTApp());
 }
 
@@ -538,7 +545,9 @@ class _SettingsPageState extends State<SettingsPage> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
           FilledButton(
             onPressed: () {
-              setState(() { globalApiBaseUrl = _urlController.text.trim(); });
+              final url = _urlController.text.trim();
+              setState(() { globalApiBaseUrl = url; });
+              SettingsService.saveApiUrl(url);
               Navigator.pop(context);
             },
             child: const Text('儲存'),
@@ -578,7 +587,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('飼料剩餘警報'),
                   subtitle: const Text('剩餘量過低時提醒'),
                   trailing: Text('${globalFeedThreshold.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4CA1AF), fontSize: 16)),
-                  onTap: () => _showThresholdDialog('設定飼料警報閾值', globalFeedThreshold, (v) => globalFeedThreshold = v),
+                  onTap: () => _showThresholdDialog('設定飼料警報閾值', globalFeedThreshold, (v) {
+                    globalFeedThreshold = v;
+                    SettingsService.saveFeedThreshold(v);
+                  }),
                 ),
                 const Divider(height: 1, indent: 50),
                 ListTile(
@@ -586,7 +598,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('水位深度警報'),
                   subtitle: const Text('飲水不足時提醒'),
                   trailing: Text('${globalWaterThreshold.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4CA1AF), fontSize: 16)),
-                  onTap: () => _showThresholdDialog('設定水位警報閾值', globalWaterThreshold, (v) => globalWaterThreshold = v),
+                  onTap: () => _showThresholdDialog('設定水位警報閾值', globalWaterThreshold, (v) {
+                    globalWaterThreshold = v;
+                    SettingsService.saveWaterThreshold(v);
+                  }),
                 ),
               ],
             ),

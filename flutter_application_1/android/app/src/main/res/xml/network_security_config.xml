@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
+    <!-- WHEP 串流 (port 8889) 與感測器 API (port 8000) 同一個 IP -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">137.184.181.86</domain>
     </domain-config>
