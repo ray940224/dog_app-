@@ -461,7 +461,7 @@ class StatisticsPage extends StatelessWidget {
 }
 
 // ==========================================
-// 6. 設定頁面 (Settings & Threshold Control)
+// 6. 設定頁面 (Settings & Threshold Control) 66622222222
 // ==========================================
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -485,7 +485,7 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
-  // 顯示百分比設定 Dialog
+  // 顯示百分比設定 Dialog 
   void _showThresholdDialog(String title, double currentValue, Function(double) onSave) {
     double tempValue = currentValue;
     showDialog(
