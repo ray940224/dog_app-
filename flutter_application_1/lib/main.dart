@@ -6,19 +6,23 @@ import 'widgets/whep_video_widget.dart';
 import 'services/settings_service.dart';
 
 // ==========================================
-// 全域變數：儲存 API 網址與警報閾值
+// 全域變數
 // ==========================================
 String globalApiBaseUrl = 'http://137.184.181.86:8000/';
-double globalFeedThreshold = 20.0;   // 飼料剩餘低於此 % 數時警報
-double globalWaterThreshold = 15.0;  // 水位低於此 % 數時警報
+double globalFeedThreshold = 20.0;
+double globalWaterThreshold = 15.0;
+List<String> globalPetList = []; 
+String currentSelectedPet = '';  
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // 從本地儲存讀取上次的設定值
+  
   final settings = await SettingsService.load();
   globalApiBaseUrl      = settings['apiUrl'];
   globalFeedThreshold   = settings['feedThreshold'];
   globalWaterThreshold  = settings['waterThreshold'];
+  globalPetList         = List<String>.from(settings['petList']);
+  
   runApp(const IoTApp());
 }
 
@@ -125,8 +129,80 @@ class LoginPage extends StatelessWidget {
 // ==========================================
 // 2. 寵物選擇頁面 (Pet Selection Page)
 // ==========================================
-class PetSelectionPage extends StatelessWidget {
+class PetSelectionPage extends StatefulWidget {
   const PetSelectionPage({super.key});
+
+  @override
+  State<PetSelectionPage> createState() => _PetSelectionPageState();
+}
+
+class _PetSelectionPageState extends State<PetSelectionPage> {
+  // 新增：用來記錄真實連線狀態的變數
+  bool _isOnline = false;
+  bool _isLoadingStatus = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkDeviceStatus(); // 畫面一載入就偷偷檢查連線
+  }
+
+  // 測試連線的函數
+  Future<void> _checkDeviceStatus() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingStatus = true;
+    });
+
+    try {
+      final baseUrl = globalApiBaseUrl.endsWith('/') ? globalApiBaseUrl : '$globalApiBaseUrl/';
+      final url = Uri.parse('${baseUrl}sensors');
+      
+      final response = await http.get(
+        url,
+        headers: {"ngrok-skip-browser-warning": "true"},
+      ).timeout(const Duration(seconds: 3)); // 3秒沒回應就算離線
+
+      if (mounted) {
+        setState(() {
+          _isOnline = response.statusCode == 200;
+          _isLoadingStatus = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isOnline = false;
+          _isLoadingStatus = false;
+        });
+      }
+    }
+  }
+
+  void _deletePet(int index) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('刪除寵物艙'),
+          content: Text('確定要移除「${globalPetList[index]}」嗎？這項操作無法復原。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  globalPetList.removeAt(index); 
+                });
+                SettingsService.savePetList(globalPetList); 
+                Navigator.pop(context);
+              },
+              child: const Text('確認刪除', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -148,21 +224,44 @@ class PetSelectionPage extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             
-            _buildPetCard(
-              context,
-              name: '布丁 (黃金獵犬)',
-              status: '環境正常',
-              icon: Icons.cruelty_free,
-              color: Colors.orange,
-            ),
-            const SizedBox(height: 16),
-            
-            _buildPetCard(
-              context,
-              name: '麻糬 (曼赤肯貓)',
-              status: '溫度偏低',
-              icon: Icons.pest_control_rodent,
-              color: Colors.grey,
+            Expanded(
+              // 加入 RefreshIndicator 支援下拉重新整理
+              child: RefreshIndicator(
+                onRefresh: _checkDeviceStatus,
+                color: const Color(0xFF4CA1AF),
+                child: globalPetList.isEmpty
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: const [
+                          SizedBox(height: 60),
+                          Icon(Icons.pets, size: 80, color: Colors.black12),
+                          SizedBox(height: 20),
+                          Text('目前尚未綁定任何寵物艙', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black54)),
+                          SizedBox(height: 8),
+                          Text('請點擊下方按鈕新增您的寵物。', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey)),
+                        ],
+                      )
+                    : ListView.separated(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        itemCount: globalPetList.length,
+                        separatorBuilder: (context, index) => const SizedBox(height: 16),
+                        itemBuilder: (context, index) {
+                          // 動態決定狀態文字與顏色
+                          String currentStatus = _isLoadingStatus ? '連線偵測中...' : (_isOnline ? '設備已上線' : '設備目前離線');
+                          Color statusColor = _isLoadingStatus ? Colors.grey : (_isOnline ? Colors.green : Colors.redAccent);
+
+                          return _buildPetCard(
+                            context,
+                            index: index,
+                            name: globalPetList[index],
+                            status: currentStatus,
+                            statusColor: statusColor, // 傳遞顏色
+                            icon: Icons.pets,
+                            color: Colors.orange,
+                          );
+                        },
+                      ),
+              ),
             ),
             
             const SizedBox(height: 20),
@@ -172,9 +271,14 @@ class PetSelectionPage extends StatelessWidget {
                 side: const BorderSide(color: Color(0xFF4CA1AF)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
               ),
-              onPressed: () {},
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AddPetPage()),
+                );
+              },
               icon: const Icon(Icons.add, color: Color(0xFF4CA1AF)),
-              label: const Text('新增寵物艙綁定', style: TextStyle(color: Color(0xFF4CA1AF), fontWeight: FontWeight.bold)),
+              label: const Text('新增寵物艙綁定', style: TextStyle(color: Color(0xFF4CA1AF), fontWeight: FontWeight.bold, fontSize: 16)),
             ),
           ],
         ),
@@ -182,16 +286,18 @@ class PetSelectionPage extends StatelessWidget {
     );
   }
 
-  Widget _buildPetCard(BuildContext context, {required String name, required String status, required IconData icon, required Color color}) {
+  // 接收動態顏色參數
+  Widget _buildPetCard(BuildContext context, {required int index, required String name, required String status, required Color statusColor, required IconData icon, required Color color}) {
     return GestureDetector(
       onTap: () {
+        currentSelectedPet = name; 
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const MainNavigation()),
         );
       },
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -211,11 +317,94 @@ class PetSelectionPage extends StatelessWidget {
                 children: [
                   Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
                   const SizedBox(height: 4),
-                  Text(status, style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
+                  // 套用動態顏色
+                  Text(status, style: TextStyle(fontSize: 14, color: statusColor, fontWeight: FontWeight.w500)),
                 ],
               ),
             ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.grey),
+              onPressed: () => _deletePet(index),
+            ),
             const Icon(Icons.chevron_right, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 2.5 新增寵物頁面 (Add Pet Page)
+// ==========================================
+class AddPetPage extends StatefulWidget {
+  const AddPetPage({super.key});
+
+  @override
+  State<AddPetPage> createState() => _AddPetPageState();
+}
+
+class _AddPetPageState extends State<AddPetPage> {
+  final TextEditingController _nameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('新增寵物', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(30.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('為您的寶貝建立檔案', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+            const SizedBox(height: 10),
+            const Text('請輸入寵物的名稱，方便日後在儀表板查看狀態。', style: TextStyle(fontSize: 14, color: Colors.grey)),
+            const SizedBox(height: 30),
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(
+                hintText: '寵物名稱 (例如: 布丁)',
+                prefixIcon: const Icon(Icons.cruelty_free),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+              ),
+            ),
+            const SizedBox(height: 30),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                backgroundColor: const Color(0xFF4CA1AF),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              ),
+              onPressed: () {
+                String inputName = _nameController.text.trim();
+                if (inputName.isNotEmpty) {
+                  globalPetList.add(inputName);
+                  SettingsService.savePetList(globalPetList);
+                  currentSelectedPet = inputName;
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (context) => const MainNavigation()),
+                    (route) => false,
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請輸入寵物名稱')));
+                }
+              },
+              child: const Text('確認綁定並進入系統', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
           ],
         ),
       ),
@@ -326,10 +515,13 @@ class _DashboardPageState extends State<DashboardPage> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          final luxValue = data['light_lux'];
+          final luxValue = data['light'];
           lightLux = (luxValue is num) ? luxValue.toStringAsFixed(1) : '--';
           feedWeight = (data['weight'] ?? 0.0).toDouble();
-          waterAdc = data['water_adc'] ?? 0;
+          
+          final waterRaw = data['water'];
+          waterAdc = waterRaw != null ? (int.tryParse(waterRaw.toString().split('.').first) ?? 0) : 0;
+          
           errorMessage = '';
         });
       } else {
@@ -347,7 +539,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('布丁的寵物艙', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 22)),
+        title: Text('$currentSelectedPet的寵物艙', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
@@ -487,7 +679,6 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
-  // 顯示百分比設定 Dialog
   void _showThresholdDialog(String title, double currentValue, Function(double) onSave) {
     double tempValue = currentValue;
     showDialog(
@@ -521,7 +712,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   onPressed: () {
                     onSave(tempValue);
                     Navigator.pop(context);
-                    setState(() {}); // 刷新設定頁面 UI
+                    setState(() {});
                   },
                   style: FilledButton.styleFrom(backgroundColor: const Color(0xFF4CA1AF)),
                   child: const Text('儲存'),

@@ -4,6 +4,7 @@ class SettingsService {
   static const _keyApiUrl        = 'api_base_url';
   static const _keyFeedThreshold = 'feed_threshold';
   static const _keyWaterThreshold = 'water_threshold';
+  static const _keyPetList       = 'pet_list'; // 用來儲存寵物列表的 Key
 
   static const String _defaultApiUrl        = 'http://137.184.181.86:8000/';
   static const double _defaultFeedThreshold  = 20.0;
@@ -16,6 +17,8 @@ class SettingsService {
       'apiUrl':         prefs.getString(_keyApiUrl)         ?? _defaultApiUrl,
       'feedThreshold':  prefs.getDouble(_keyFeedThreshold)  ?? _defaultFeedThreshold,
       'waterThreshold': prefs.getDouble(_keyWaterThreshold) ?? _defaultWaterThreshold,
+      // 讀取寵物列表，如果沒有存過就給一個空的列表 []
+      'petList':        prefs.getStringList(_keyPetList)    ?? <String>[], 
     };
   }
 
@@ -32,5 +35,11 @@ class SettingsService {
   static Future<void> saveWaterThreshold(double value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyWaterThreshold, value);
+  }
+
+  /// 儲存整份寵物名單
+  static Future<void> savePetList(List<String> list) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyPetList, list);
   }
 }
