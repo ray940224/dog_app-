@@ -6,7 +6,7 @@ import 'widgets/whep_video_widget.dart';
 import 'services/settings_service.dart';
 
 // ==========================================
-// 全域變數
+// 全域變數 (現在只作為當前選中寵物的暫存區)
 // ==========================================
 String globalApiBaseUrl = 'http://137.184.181.86:8000/';
 double globalFeedThreshold = 20.0;
@@ -17,11 +17,8 @@ String currentSelectedPet = '';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  final settings = await SettingsService.load();
-  globalApiBaseUrl      = settings['apiUrl'];
-  globalFeedThreshold   = settings['feedThreshold'];
-  globalWaterThreshold  = settings['waterThreshold'];
-  globalPetList         = List<String>.from(settings['petList']);
+  // 剛開 App 時，我們只需要知道「有哪些寵物」就好
+  globalPetList = await SettingsService.loadPetList();
   
   runApp(const IoTApp());
 }
@@ -67,53 +64,23 @@ class LoginPage extends StatelessWidget {
               children: [
                 const Icon(Icons.pets, size: 80, color: Color(0xFF4CA1AF)),
                 const SizedBox(height: 20),
-                const Text(
-                  '歡迎回來',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
-                ),
+                const Text('歡迎回來', textAlign: TextAlign.center, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 8),
-                const Text(
-                  '登入以查看您的智慧寵物艙',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
-                ),
+                const Text('登入以查看您的智慧寵物艙', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey)),
                 const SizedBox(height: 40),
-                
                 TextField(
-                  decoration: InputDecoration(
-                    hintText: '電子郵件',
-                    prefixIcon: const Icon(Icons.email_outlined),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                  ),
+                  decoration: InputDecoration(hintText: '電子郵件', prefixIcon: const Icon(Icons.email_outlined), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none)),
                 ),
                 const SizedBox(height: 16),
-                
                 TextField(
                   obscureText: true,
-                  decoration: InputDecoration(
-                    hintText: '密碼',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                  ),
+                  decoration: InputDecoration(hintText: '密碼', prefixIcon: const Icon(Icons.lock_outline), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none)),
                 ),
                 const SizedBox(height: 30),
-                
                 FilledButton(
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    backgroundColor: const Color(0xFF4CA1AF),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                  ),
+                  style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: const Color(0xFF4CA1AF), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
                   onPressed: () {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (context) => const PetSelectionPage()),
-                    );
+                    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const PetSelectionPage()));
                   },
                   child: const Text('登入', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
@@ -137,45 +104,37 @@ class PetSelectionPage extends StatefulWidget {
 }
 
 class _PetSelectionPageState extends State<PetSelectionPage> {
-  // 新增：用來記錄真實連線狀態的變數
-  bool _isOnline = false;
+  // 改用 Map 來記錄「每一隻寵物」的連線狀態
+  Map<String, bool> _petOnlineStatus = {};
   bool _isLoadingStatus = true;
 
   @override
   void initState() {
     super.initState();
-    _checkDeviceStatus(); // 畫面一載入就偷偷檢查連線
+    _checkDeviceStatus(); 
   }
 
-  // 測試連線的函數
   Future<void> _checkDeviceStatus() async {
     if (!mounted) return;
-    setState(() {
-      _isLoadingStatus = true;
-    });
+    setState(() { _isLoadingStatus = true; });
 
-    try {
-      final baseUrl = globalApiBaseUrl.endsWith('/') ? globalApiBaseUrl : '$globalApiBaseUrl/';
-      final url = Uri.parse('${baseUrl}sensors');
-      
-      final response = await http.get(
-        url,
-        headers: {"ngrok-skip-browser-warning": "true"},
-      ).timeout(const Duration(seconds: 3)); // 3秒沒回應就算離線
+    // 針對清單中的「每一隻寵物」，分別抓取牠專屬的 API 網址來測試連線
+    for (String petName in globalPetList) {
+      try {
+        final settings = await SettingsService.loadPetSettings(petName);
+        final baseUrl = settings['apiUrl'] as String;
+        final formattedUrl = baseUrl.endsWith('/') ? baseUrl : '$baseUrl/';
+        final url = Uri.parse('${formattedUrl}sensors');
+        
+        final response = await http.get(url, headers: {"ngrok-skip-browser-warning": "true"}).timeout(const Duration(seconds: 2)); 
+        _petOnlineStatus[petName] = (response.statusCode == 200);
+      } catch (e) {
+        _petOnlineStatus[petName] = false;
+      }
+    }
 
-      if (mounted) {
-        setState(() {
-          _isOnline = response.statusCode == 200;
-          _isLoadingStatus = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isOnline = false;
-          _isLoadingStatus = false;
-        });
-      }
+    if (mounted) {
+      setState(() { _isLoadingStatus = false; });
     }
   }
 
@@ -190,9 +149,7 @@ class _PetSelectionPageState extends State<PetSelectionPage> {
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
             TextButton(
               onPressed: () {
-                setState(() {
-                  globalPetList.removeAt(index); 
-                });
+                setState(() { globalPetList.removeAt(index); });
                 SettingsService.savePetList(globalPetList); 
                 Navigator.pop(context);
               },
@@ -207,25 +164,16 @@ class _PetSelectionPageState extends State<PetSelectionPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('選擇寵物', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('選擇寵物', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0, centerTitle: true),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              '您今天要查看哪位寶貝的狀態？',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black87),
-            ),
+            const Text('您今天要查看哪位寶貝的狀態？', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black87)),
             const SizedBox(height: 20),
             
             Expanded(
-              // 加入 RefreshIndicator 支援下拉重新整理
               child: RefreshIndicator(
                 onRefresh: _checkDeviceStatus,
                 color: const Color(0xFF4CA1AF),
@@ -246,16 +194,18 @@ class _PetSelectionPageState extends State<PetSelectionPage> {
                         itemCount: globalPetList.length,
                         separatorBuilder: (context, index) => const SizedBox(height: 16),
                         itemBuilder: (context, index) {
-                          // 動態決定狀態文字與顏色
-                          String currentStatus = _isLoadingStatus ? '連線偵測中...' : (_isOnline ? '設備已上線' : '設備目前離線');
-                          Color statusColor = _isLoadingStatus ? Colors.grey : (_isOnline ? Colors.green : Colors.redAccent);
+                          final petName = globalPetList[index];
+                          final isOnline = _petOnlineStatus[petName] ?? false;
+                          
+                          String currentStatus = _isLoadingStatus ? '連線偵測中...' : (isOnline ? '設備已上線' : '設備目前離線');
+                          Color statusColor = _isLoadingStatus ? Colors.grey : (isOnline ? Colors.green : Colors.redAccent);
 
                           return _buildPetCard(
                             context,
                             index: index,
-                            name: globalPetList[index],
+                            name: petName,
                             status: currentStatus,
-                            statusColor: statusColor, // 傳遞顏色
+                            statusColor: statusColor, 
                             icon: Icons.pets,
                             color: Colors.orange,
                           );
@@ -263,20 +213,10 @@ class _PetSelectionPageState extends State<PetSelectionPage> {
                       ),
               ),
             ),
-            
             const SizedBox(height: 20),
             OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                side: const BorderSide(color: Color(0xFF4CA1AF)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-              ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const AddPetPage()),
-                );
-              },
+              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: Color(0xFF4CA1AF)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AddPetPage())),
               icon: const Icon(Icons.add, color: Color(0xFF4CA1AF)),
               label: const Text('新增寵物艙綁定', style: TextStyle(color: Color(0xFF4CA1AF), fontWeight: FontWeight.bold, fontSize: 16)),
             ),
@@ -286,30 +226,25 @@ class _PetSelectionPageState extends State<PetSelectionPage> {
     );
   }
 
-  // 接收動態顏色參數
   Widget _buildPetCard(BuildContext context, {required int index, required String name, required String status, required Color statusColor, required IconData icon, required Color color}) {
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
+        // ★ 核心魔法：點擊時，立刻去保險箱把「這隻寵物專屬的設定」拿出來，放進全域變數裡！
         currentSelectedPet = name; 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const MainNavigation()),
-        );
+        final settings = await SettingsService.loadPetSettings(name);
+        globalApiBaseUrl = settings['apiUrl'];
+        globalFeedThreshold = settings['feedThreshold'];
+        globalWaterThreshold = settings['waterThreshold'];
+
+        if (!context.mounted) return;
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const MainNavigation()));
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
-        ),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
-              child: Icon(icon, color: color, size: 32),
-            ),
+            Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: color.withValues(alpha: 0.15), shape: BoxShape.circle), child: Icon(icon, color: color, size: 32)),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -317,15 +252,11 @@ class _PetSelectionPageState extends State<PetSelectionPage> {
                 children: [
                   Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
                   const SizedBox(height: 4),
-                  // 套用動態顏色
                   Text(status, style: TextStyle(fontSize: 14, color: statusColor, fontWeight: FontWeight.w500)),
                 ],
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.grey),
-              onPressed: () => _deletePet(index),
-            ),
+            IconButton(icon: const Icon(Icons.delete_outline, color: Colors.grey), onPressed: () => _deletePet(index)),
             const Icon(Icons.chevron_right, color: Colors.grey),
           ],
         ),
@@ -356,12 +287,7 @@ class _AddPetPageState extends State<AddPetPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('新增寵物', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('新增寵物', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0, centerTitle: true),
       body: Padding(
         padding: const EdgeInsets.all(30.0),
         child: Column(
@@ -373,32 +299,26 @@ class _AddPetPageState extends State<AddPetPage> {
             const SizedBox(height: 30),
             TextField(
               controller: _nameController,
-              decoration: InputDecoration(
-                hintText: '寵物名稱 (例如: 布丁)',
-                prefixIcon: const Icon(Icons.cruelty_free),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-              ),
+              decoration: InputDecoration(hintText: '寵物名稱 (例如: 布丁)', prefixIcon: const Icon(Icons.cruelty_free), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none)),
             ),
             const SizedBox(height: 30),
             FilledButton(
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                backgroundColor: const Color(0xFF4CA1AF),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-              ),
-              onPressed: () {
+              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: const Color(0xFF4CA1AF), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+              onPressed: () async {
                 String inputName = _nameController.text.trim();
                 if (inputName.isNotEmpty) {
                   globalPetList.add(inputName);
-                  SettingsService.savePetList(globalPetList);
+                  await SettingsService.savePetList(globalPetList);
+                  
+                  // ★ 新增寵物後，也要載入它的預設設定
                   currentSelectedPet = inputName;
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (context) => const MainNavigation()),
-                    (route) => false,
-                  );
+                  final settings = await SettingsService.loadPetSettings(inputName);
+                  globalApiBaseUrl = settings['apiUrl'];
+                  globalFeedThreshold = settings['feedThreshold'];
+                  globalWaterThreshold = settings['waterThreshold'];
+
+                  if (!context.mounted) return;
+                  Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const MainNavigation()), (route) => false);
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請輸入寵物名稱')));
                 }
@@ -432,9 +352,7 @@ class _MainNavigationState extends State<MainNavigation> {
   ];
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() { _selectedIndex = index; });
   }
 
   @override
@@ -442,9 +360,7 @@ class _MainNavigationState extends State<MainNavigation> {
     return Scaffold(
       body: _pages.elementAt(_selectedIndex),
       bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, -5))],
-        ),
+        decoration: BoxDecoration(boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, offset: const Offset(0, -5))]),
         child: ClipRRect(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           child: BottomNavigationBar(
@@ -512,6 +428,8 @@ class _DashboardPageState extends State<DashboardPage> {
         headers: {"ngrok-skip-browser-warning": "true"},
       ).timeout(const Duration(seconds: 5));
 
+      if (!mounted) return; 
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
@@ -525,10 +443,11 @@ class _DashboardPageState extends State<DashboardPage> {
           errorMessage = '';
         });
       } else {
-        setState(() { errorMessage = '伺服器錯誤: ${response.statusCode}'; });
+        setState(() { errorMessage = '寵物艙系統回應異常 (錯誤碼: ${response.statusCode})，請稍後再試。'; });
       }
     } catch (e) {
-      setState(() { errorMessage = '連線失敗: ${e.toString().split('\n').first}'; });
+      if (!mounted) return; 
+      setState(() { errorMessage = '無法連線至寵物艙，請前往「設定」檢查 API 網址是否正確，或確認手機網路是否通暢。'; });
     }
   }
 
@@ -630,7 +549,7 @@ class _DashboardPageState extends State<DashboardPage> {
             children: [
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label), Text(valueText)]),
               const SizedBox(height: 8),
-              LinearProgressIndicator(value: percentage, minHeight: 12, backgroundColor: color.withOpacity(0.15), valueColor: AlwaysStoppedAnimation<Color>(color)),
+              LinearProgressIndicator(value: percentage, minHeight: 12, backgroundColor: color.withValues(alpha: 0.15), valueColor: AlwaysStoppedAnimation<Color>(color)),
             ],
           ),
         ),
@@ -738,7 +657,10 @@ class _SettingsPageState extends State<SettingsPage> {
             onPressed: () {
               final url = _urlController.text.trim();
               setState(() { globalApiBaseUrl = url; });
-              SettingsService.saveApiUrl(url);
+              
+              // ★ 這裡改了！儲存的時候，會連同「當前的寵物名字」一起存進去
+              SettingsService.saveApiUrl(currentSelectedPet, url);
+              
               Navigator.pop(context);
             },
             child: const Text('儲存'),
@@ -780,7 +702,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   trailing: Text('${globalFeedThreshold.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4CA1AF), fontSize: 16)),
                   onTap: () => _showThresholdDialog('設定飼料警報閾值', globalFeedThreshold, (v) {
                     globalFeedThreshold = v;
-                    SettingsService.saveFeedThreshold(v);
+                    SettingsService.saveFeedThreshold(currentSelectedPet, v); // ★ 同理，存給對應寵物
                   }),
                 ),
                 const Divider(height: 1, indent: 50),
@@ -791,7 +713,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   trailing: Text('${globalWaterThreshold.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4CA1AF), fontSize: 16)),
                   onTap: () => _showThresholdDialog('設定水位警報閾值', globalWaterThreshold, (v) {
                     globalWaterThreshold = v;
-                    SettingsService.saveWaterThreshold(v);
+                    SettingsService.saveWaterThreshold(currentSelectedPet, v); // ★ 同理，存給對應寵物
                   }),
                 ),
               ],
@@ -814,7 +736,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSettingsCard({required Widget child}) {
     return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
       child: child,
     );
   }
