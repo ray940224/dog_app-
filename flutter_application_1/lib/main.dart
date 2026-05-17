@@ -433,11 +433,11 @@ class _DashboardPageState extends State<DashboardPage> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          final luxValue = data['light'];
+          final luxValue = data['light_lux'];
           lightLux = (luxValue is num) ? luxValue.toStringAsFixed(1) : '--';
           feedWeight = (data['weight'] ?? 0.0).toDouble();
           
-          final waterRaw = data['water'];
+          final waterRaw = data['water_adc'];
           waterAdc = waterRaw != null ? (int.tryParse(waterRaw.toString().split('.').first) ?? 0) : 0;
           
           errorMessage = '';
